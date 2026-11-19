@@ -6,7 +6,7 @@ TOLERANCE_MIB=16
 detect_target()
 {
     case "$1" in
-        starlte|star2lte|crownlte)
+        starlte|star2lte|crownlte|r7)
             echo "$1"
             return
             ;;
@@ -16,6 +16,9 @@ detect_target()
     case "$bootloader" in
         *N960*|*N965*)
             echo crownlte
+            ;;
+        *N770*)
+            echo r7
             ;;
         *G965*)
             echo star2lte

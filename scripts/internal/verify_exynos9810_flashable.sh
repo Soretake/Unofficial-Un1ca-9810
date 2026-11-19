@@ -24,6 +24,22 @@ case "$EXPECTED_FS" in
         ;;
 esac
 
+# DS-ACK kernel device-tree model(s) expected inside the kernel zip. The bundled
+# prebuilts and their pinned SHA-256 cover the S9/S9+/Note9 family only. r7
+# (Galaxy Note10 Lite, SM-N770F) ships its own DS-ACK kernel zip (floyd/N770F-*),
+# so the fixed SHA pin above does not apply to r7 unless the operator sets
+# EXYNOS9810_EXPECTED_KERNEL_SHA256 to their r7 kernel's hash.
+case "${TARGET_CODENAME:-}" in
+    r7)
+        KERNEL_MODELS="N770F"
+        [ -n "${EXYNOS9810_EXPECTED_KERNEL_SHA256:-}" ] || EXPECTED_KERNEL_SHA256=""
+        ;;
+    *)
+        KERNEL_MODELS="G960F G960N G965F G965N N960F N960N"
+        ;;
+esac
+KERNEL_BASELINE_MODEL="${KERNEL_MODELS%% *}"
+
 VERIFY_TMP="$(mktemp -d)"
 trap 'rm -rf "$VERIFY_TMP"' EXIT INT TERM
 
@@ -90,13 +106,13 @@ unzip -p "$ZIP_FILE" exynos9810/ramdisk.img > "$VERIFY_TMP/ramdisk.img"
 
 unzip -p "$ZIP_FILE" exynos9810/kernel.zip > "$VERIFY_TMP/kernel.zip"
 ACTUAL_KERNEL_SHA256="$(sha256sum "$VERIFY_TMP/kernel.zip" | awk '{print $1}')"
-if [ "$ACTUAL_KERNEL_SHA256" != "$EXPECTED_KERNEL_SHA256" ]; then
+if [ -n "$EXPECTED_KERNEL_SHA256" ] && [ "$ACTUAL_KERNEL_SHA256" != "$EXPECTED_KERNEL_SHA256" ]; then
     echo "Exynos9810 flashable verification: wrong DS-ACK kernel for $EXPECTED_FS" >&2
     exit 1
 fi
 unzip -tq "$VERIFY_TMP/kernel.zip" >/dev/null
 unzip -Z1 "$VERIFY_TMP/kernel.zip" > "$VERIFY_TMP/kernel.list"
-for DEVICE in G960F G960N G965F G965N N960F N960N; do
+for DEVICE in $KERNEL_MODELS; do
     for SUFFIX in kernel dtb; do
         grep -Fxq "floyd/${DEVICE}-${SUFFIX}" "$VERIFY_TMP/kernel.list" || {
             echo "Exynos9810 flashable verification: kernel payload missing ${DEVICE}-${SUFFIX}" >&2
@@ -105,17 +121,18 @@ for DEVICE in G960F G960N G965F G965N N960F N960N; do
     done
 done
 
-# G960F is the full DTB baseline; the other five entries are bsdiff patches.
-# The exact nested zip hash above verifies those patches byte-for-byte.
-unzip -p "$VERIFY_TMP/kernel.zip" floyd/G960F-dtb > "$VERIFY_TMP/G960F-dtb"
-strings "$VERIFY_TMP/G960F-dtb" > "$VERIFY_TMP/G960F-dtb.strings"
+# The first model is the full DTB baseline; for the S9 family the other five
+# entries are bsdiff patches. The exact nested zip hash above verifies those
+# patches byte-for-byte when a SHA pin applies.
+unzip -p "$VERIFY_TMP/kernel.zip" "floyd/${KERNEL_BASELINE_MODEL}-dtb" > "$VERIFY_TMP/baseline-dtb"
+strings "$VERIFY_TMP/baseline-dtb" > "$VERIFY_TMP/baseline-dtb.strings"
 if [ "$EXPECTED_FS" = "erofs" ]; then
-    grep -q erofs "$VERIFY_TMP/G960F-dtb.strings" || {
+    grep -q erofs "$VERIFY_TMP/baseline-dtb.strings" || {
         echo "Exynos9810 flashable verification: EROFS DTB marker missing" >&2
         exit 1
     }
 else
-    if grep -q erofs "$VERIFY_TMP/G960F-dtb.strings"; then
+    if grep -q erofs "$VERIFY_TMP/baseline-dtb.strings"; then
         echo "Exynos9810 flashable verification: ext4 build contains an EROFS DTB" >&2
         exit 1
     fi
@@ -154,4 +171,5 @@ if grep -q -e bootlogger-init -e patch_bootlogger "$VERIFY_TMP/updater-script"; 
     exit 1
 fi
 
-echo "Verified Exynos9810 flashable: $(basename "$ZIP_FILE") ($EXPECTED_FS, enforcing, six device payloads)"
+KERNEL_MODEL_COUNT="$(echo "$KERNEL_MODELS" | wc -w)"
+echo "Verified Exynos9810 flashable: $(basename "$ZIP_FILE") ($EXPECTED_FS, enforcing, ${KERNEL_MODEL_COUNT} device payload(s))"

@@ -116,13 +116,40 @@ case "${TARGET_OS_FILE_SYSTEM_TYPE:-}" in
         exit 1
         ;;
 esac
-DS_ACK_LOCAL_ZIP="${DS_ACK_LOCAL_ZIP:-$DS_ACK_PREBUILT_ZIP}"
+# DS-ACK kernel device-tree model(s) expected inside the kernel zip (floyd/
+# <MODEL>-{kernel,dtb}). The prebuilts bundled in this repository cover the
+# S9/S9+/Note9 family only. r7 (Galaxy Note10 Lite, SM-N770F) has its own
+# board/panel/touch device tree, so it needs its own DS-ACK kernel zip with
+# floyd/N770F-{kernel,dtb} (erofs and ext4 variants) supplied via
+# EXYNOS9810_KERNEL_ZIP; see R7-PORT-NOTES.md "The kernel gap".
+case "${TARGET_CODENAME:-}" in
+    r7)
+        EXYNOS9810_KERNEL_MODELS="N770F"
+        EXYNOS9810_KERNEL_USES_PREBUILT=false
+        ;;
+    *)
+        EXYNOS9810_KERNEL_MODELS="G960F G960N G965F G965N N960F N960N"
+        EXYNOS9810_KERNEL_USES_PREBUILT=true
+        ;;
+esac
+EXYNOS9810_KERNEL_BASELINE_MODEL="${EXYNOS9810_KERNEL_MODELS%% *}"
+
+if $EXYNOS9810_KERNEL_USES_PREBUILT; then
+    DS_ACK_LOCAL_ZIP="${DS_ACK_LOCAL_ZIP:-$DS_ACK_PREBUILT_ZIP}"
+else
+    # No bundled prebuilt exists for this target; the kernel must be provided.
+    DS_ACK_LOCAL_ZIP="${DS_ACK_LOCAL_ZIP:-}"
+fi
 CROWNTRAIL_KERNEL_ZIP="${CROWNTRAIL_KERNEL_ZIP:-}"
 # DS-ACK V1.14 kernel payload is selected above; brightness scaling remains
 # selected by the legacy Samsung profile in floating_feature.xml.
-if [ -z "${EXYNOS9810_KERNEL_ZIP:-}" ] && [ -f "$DS_ACK_LOCAL_ZIP" ]; then
+if [ -z "${EXYNOS9810_KERNEL_ZIP:-}" ] && [ -n "$DS_ACK_LOCAL_ZIP" ] && [ -f "$DS_ACK_LOCAL_ZIP" ]; then
     EXYNOS9810_KERNEL_NAME="${EXYNOS9810_KERNEL_NAME:-DS-ACK V1.14 Enforcing KernelSU-Next v3.4.0-legacy + SuSFS v1.5.5}"
     EXYNOS9810_KERNEL_ZIP="$DS_ACK_LOCAL_ZIP"
+elif [ -z "${EXYNOS9810_KERNEL_ZIP:-}" ] && ! $EXYNOS9810_KERNEL_USES_PREBUILT; then
+    LOGE "No Exynos9810 kernel package is bundled for ${TARGET_CODENAME:-this target}."
+    LOGE "Build/obtain an enforcing DS-ACK ${TARGET_OS_FILE_SYSTEM_TYPE} kernel zip that contains floyd/${EXYNOS9810_KERNEL_BASELINE_MODEL}-kernel and floyd/${EXYNOS9810_KERNEL_BASELINE_MODEL}-dtb, then set EXYNOS9810_KERNEL_ZIP to it."
+    exit 1
 elif [ -z "${EXYNOS9810_KERNEL_ZIP:-}" ]; then
     LOGE "Exynos9810 enforcing DS-ACK kernel package not found: $DS_ACK_LOCAL_ZIP"
     LOGE "Provide the enforcing ${TARGET_OS_FILE_SYSTEM_TYPE} kernel package at that path, or set EXYNOS9810_KERNEL_ZIP explicitly."
@@ -147,7 +174,7 @@ if [ -f "$EXYNOS9810_KERNEL_ZIP" ]; then
         exit 1
     }
     EXYNOS9810_KERNEL_LIST="$(unzip -Z1 "$EXYNOS9810_KERNEL_ZIP")"
-    for EXYNOS9810_DEVICE in G960F G960N G965F G965N N960F N960N; do
+    for EXYNOS9810_DEVICE in $EXYNOS9810_KERNEL_MODELS; do
         for EXYNOS9810_PAYLOAD in kernel dtb; do
             grep -Fxq "floyd/${EXYNOS9810_DEVICE}-${EXYNOS9810_PAYLOAD}" \
                 <<< "$EXYNOS9810_KERNEL_LIST" || {
@@ -185,7 +212,7 @@ if [ -f "$EXYNOS9810_KERNEL_ZIP" ]; then
 
     # Verify that the kernel DTB and image filesystem agree. An ext4 image
     # with an EROFS DTB (or the reverse) fails before Android userspace starts.
-    EXYNOS9810_KERNEL_DTB_EROFS="$(unzip -p "$EXYNOS9810_KERNEL_ZIP" "floyd/G960F-dtb" 2>/dev/null | dd bs=1 skip=2048 2>/dev/null | strings | grep -c "erofs" || true)"
+    EXYNOS9810_KERNEL_DTB_EROFS="$(unzip -p "$EXYNOS9810_KERNEL_ZIP" "floyd/${EXYNOS9810_KERNEL_BASELINE_MODEL}-dtb" 2>/dev/null | dd bs=1 skip=2048 2>/dev/null | strings | grep -c "erofs" || true)"
     if $DS_ACK_EXPECT_EROFS; then
         [ "${EXYNOS9810_KERNEL_DTB_EROFS:-0}" -gt 0 ] || {
             LOGE "Exynos9810 EROFS build requires an EROFS DS-ACK device tree"

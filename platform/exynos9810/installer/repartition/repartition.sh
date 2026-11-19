@@ -27,7 +27,12 @@ case "$1" in
         odmsize=860
         cachesize=520
         ;;
-    starlte|star2lte|"")
+    starlte|star2lte|r7|"")
+        # r7 (Galaxy Note10 Lite, SM-N770F) shares the S9/S9+ One UI 8 layout:
+        # system=9500MiB, vendor=1300MiB, odm=700MiB, cache=600MiB. These match
+        # the r7 odm/cache sizes inherited from platform/exynos9810/config.sh.
+        # The plan is applied with sgdisk --pretend first, so a device whose
+        # reclaimable region is too small aborts before the GPT is touched.
         systemsize=9500
         vendorsize=1300
         odmsize=700

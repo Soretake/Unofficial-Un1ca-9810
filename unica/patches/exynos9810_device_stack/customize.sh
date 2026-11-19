@@ -2165,6 +2165,16 @@ _EXYNOS9810_TARGET_IDENTITY()
             NAME="crownltexx"
             STOCK_INCREMENTAL="N960FXXUHFVG4"
             ;;
+        r7)
+            # Galaxy Note10 Lite. The vendor/odm identity stays genuine N770F
+            # because EXYNOS9810_PRESERVE_N770_VENDOR_IDENTITY defaults to true;
+            # only the system/product identity is set here. STOCK_INCREMENTAL is
+            # the donor build (the owner runs N770FXXS9HXA3); update it to match
+            # whichever N770F firmware is actually extracted into out/fw.
+            MODEL="SM-N770F"
+            NAME="r7xx"
+            STOCK_INCREMENTAL="N770FXXS9HXA3"
+            ;;
         *)
             return 0
             ;;
@@ -3159,6 +3169,15 @@ _EXYNOS9810_APPLY_BOOT_PROPS()
         star2lte | crownlte)
             _EXYNOS9810_SET_PROP_ALL "ro.sf.lcd_density" "560"
             _EXYNOS9810_SET_PROP_ALL "ro.sf.init.lcd_density" "560"
+            ;;
+        r7)
+            # Galaxy Note10 Lite: flat 6.7" Full HD+ (2400x1080) native panel,
+            # NOT WQHD. Both densities are the stock Note10 Lite value (420),
+            # giving 1080 * 160 / 420 = 411dp width. There is no higher native
+            # resolution to scale from (DYN_RESOLUTION_CONTROL is false for r7),
+            # so ro.sf.init.lcd_density equals ro.sf.lcd_density.
+            _EXYNOS9810_SET_PROP_ALL "ro.sf.lcd_density" "420"
+            _EXYNOS9810_SET_PROP_ALL "ro.sf.init.lcd_density" "420"
             ;;
         *)
             _EXYNOS9810_SET_PROP_ALL "ro.sf.lcd_density" "420"
