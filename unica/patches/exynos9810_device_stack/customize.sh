@@ -4477,6 +4477,22 @@ EXYNOS9810_DEVICE="$TARGET_CODENAME"
 case "$EXYNOS9810_DEVICE" in
     starlte|star2lte|crownlte)
         ;;
+    r7)
+        # Galaxy Note10 Lite (SM-N770F) device-stack bring-up. r7 reuses the
+        # common layer and the N770F vendor base, but still needs its own
+        # per-device overlays and NFC payload (curated from extracted N770F
+        # stock). Until those exist, fail loudly instead of silently producing a
+        # non-booting image: run extract-r7-payloads.sh against out/fw/SM-N770F_*
+        # to populate them (see R7-PORT-NOTES.md section 4c).
+        if [ ! -d "$EXYNOS9810_LEGACY_PORT_DIR/device_port/device/r7/vendor" ] || \
+                [ ! -d "$EXYNOS9810_PATCH_DIR/nfc/r7/vendor" ]; then
+            LOGE "r7 (Galaxy Note10 Lite) device-stack payloads are missing."
+            LOGE "Expected: device_port/device/r7/{system,vendor,product,odm} and nfc/r7/vendor"
+            LOGE "Populate them with extract-r7-payloads.sh against extracted N770F stock,"
+            LOGE "then rebuild. See R7-PORT-NOTES.md section 4c."
+            return 1
+        fi
+        ;;
     *)
         LOGW "No legacy Exynos9810 donor device overlay mapping for $TARGET_CODENAME"
         return 0

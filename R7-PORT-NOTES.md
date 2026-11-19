@@ -195,54 +195,135 @@ all return proxy `403`/unreachable). So firmware must be obtained elsewhere:
 
 The installer flashes a DS-ACK kernel zip whose payload is keyed per model
 (`floyd/<MODEL>-{kernel,dtb}`). The repo's prebuilts only carry the six
-S9/S9+/Note9 models. You must build/obtain an **enforcing DS-ACK (or compatible)
-r7 kernel** that produces `floyd/N770F-kernel` and `floyd/N770F-dtb`, in both
-**erofs** and **ext4** DTB variants, then point the build at it:
+S9/S9+/Note9 models. r7 needs its own `floyd/N770F-kernel` + `floyd/N770F-dtb`
+in both **ext4** and **erofs** DTB variants.
+
+**Good news — the r7 kernel source already exists** (investigated and
+partially validated in the cloud session):
+
+* The ROM's kernel source is **`Eend15/exynos9810-kernel`**, branch
+  `un1ca-v1.14` (build system `apollo-un1ca.sh`, KernelSU-Next v3.4.0-legacy +
+  SuSFS v1.5.5, enforcing profile). Defconfigs: `starlte/star2lte/crownlte` +
+  `exynos9810` + `apollo`.
+* Upstream **`duhansysl/exynos9810-kernel`** has branches `N770F` and
+  **`duhan_ack-N770F`** (DS-ACK + N770F). `duhan_ack-N770F` already carries
+  complete Note10 Lite support:
+  * `arch/arm64/configs/exynos9810-r7_defconfig`
+  * `arch/arm64/boot/dts/samsung/exynos9810-r7_eur_open_0{0..5}.dts` — the r7
+    device trees, built as **dtbo overlays** (`dtbo-y +=
+    samsung/exynos9810-r7_eur_open_0X.dtbo` in `arch/arm64/boot/dts/Makefile`)
+    over the base `exynos9810.dtb` (6 panel revisions, `_00`.._05`).
+  * HEAD is "Import N770FXXU9HWI2" (an N770F stock import).
+
+**Validated in the cloud session:** `make O=out exynos9810-r7_defconfig`
+configures **cleanly** — the r7 source + device trees are valid and present.
+
+**What is NOT done, and why:** the kernel could not be *compiled* in the cloud
+session. The 4.9 Samsung tree requires the specific Android Clang toolchain
+(the ROM's prebuilts used `clang-r547379`); `apollo.sh` downloads it from
+`android.googlesource.com`, which **this environment's network policy blocks**.
+The host system Clang 18 fails the tree's `prepare-compiler-check`
+(`-fstack-protector-strong not supported` — a 4.9-vs-clang-18 mismatch). A
+GitHub-hosted Neutron Clang is reachable and `apollo.sh` supports it (options
+5–7), so the owner can build locally.
+
+Two caveats before this becomes a drop-in ROM kernel:
+
+1. **Enforcing + KernelSU-Next + SuSFS.** The raw `exynos9810-r7_defconfig`
+   builds a **permissive, non-KSU** kernel (`CONFIG_SECURITY_SELINUX_DEVELOP=y`,
+   no `CONFIG_KSU`). The ROM requires an *enforcing KernelSU* kernel (the
+   flashable verifier checks `kernel_mode.prop = selinux_mode=enforcing`). So
+   build r7 with the DS-ACK enforcing+KSU+SuSFS profile, either by:
+   * building `duhan_ack-N770F` with `apollo.sh`'s enforcing/KSU options, or
+   * porting the r7 defconfig + `dts/samsung/exynos9810-r7_*.dts` +
+     `dts/Makefile` dtbo lines into `Eend15/exynos9810-kernel un1ca-v1.14`
+     (which already integrates KernelSU-Next v3.4.0-legacy + SuSFS v1.5.5 and
+     the ROM's touch/wake fixes) and wiring an r7 target into `apollo-un1ca.sh`.
+2. **apollo has no r7 target yet.** Add to the build script:
+   `CR_CONFIG_R7=exynos9810-r7_defconfig`, `CR_VARIANT_N770F=N770F`, an r7 entry
+   in the device menu/build loop, and ensure the samsung-dir r7 dtbo is built.
+   For a single-model r7 zip, **N770F is the full base** (`floyd/N770F-kernel` +
+   `floyd/N770F-dtb`), not a bsdiff delta (G960F is the base only in the
+   six-model family zips).
+
+Then package into the same DS-ACK zip layout the installer expects
+(`floyd/N770F-{kernel,dtb}` + `META-INF/.../update-binary`), name it
+`...-Enforcing-...-{ext4,erofs}-dtb.zip`, and point the build at it:
 
 ```bash
-export EXYNOS9810_KERNEL_ZIP=/path/to/DS-ACK-...-N770F-<fs>-dtb.zip
-# optionally pin it:
+export EXYNOS9810_KERNEL_ZIP=/path/to/DS-ACK-...-N770F-ext4-dtb.zip
+# optional, to re-enable the integrity pin for r7:
 export EXYNOS9810_EXPECTED_KERNEL_SHA256=<sha256 of that zip>
 ```
 
 The r7-aware kernel validation (installer + `verify_exynos9810_flashable.sh`)
-then validates and flashes it. If you would rather flash your own r7 kernel/boot
-**separately** and have the UN1CA zip skip the kernel step, remove the kernel
-steps from `target/r7/installer/install-end.edify` and relax the
-`Installing Exynos9810 kernel zip` / `kernel.zip` checks in
-`verify_exynos9810_flashable.sh` — but bundling the kernel (the default path
-here) keeps the installer's enforcing-kernel and fs-match safety guarantees.
+then validates and flashes it. The r7 kernel is intentionally **not** committed
+as a default here: an unverified kernel wired as the silent default is a brick
+risk, and it must be built enforcing+KSU and validated on the device first.
+
+**Fallback — the owner's own N770 kernel.** If the DS-ACK enforcing+KSU build is
+not ready, the owner's **`Soretake/N770`** kernel (branch `oc-9810`,
+physwizz-based 4.9, ships `Image` + `exynos9810.dtb`, known to run on the real
+N770F) can be packaged into the same `floyd/N770F-{kernel,dtb}` layout. Tradeoff:
+it loses enforcing / KernelSU-Next / SuSFS. Because it would be *permissive*, it
+will not satisfy the installer's enforcing check, so either build it enforcing
+or relax these for r7: in `target/r7/installer/install-end.edify` drop the
+`Installing Exynos9810 kernel zip` steps (flash the kernel/boot separately), and
+in `verify_exynos9810_flashable.sh` relax the `kernel_mode.prop` enforcing check
+and the `kernel.zip`/`Installing Exynos9810 kernel zip` requirements for r7.
 
 ### 4c. Per-device bring-up payloads + open the device-stack gate
 
 `unica/patches/exynos9810_device_stack/customize.sh` is the heart of the port
 (vendor restore, HAL bridges, NFC, keymaster, radio, fstab, boot props, identity,
-density). Its **main entry gate** currently returns early for any codename that
-is not `starlte|star2lte|crownlte`:
+density). Its **main entry gate is now open for r7**, behind a guard so the tree
+stays buildable: an r7 build runs the device stack if the payloads exist, and
+otherwise **fails loudly** (instead of silently producing a non-booting image)
+pointing you at the extraction script:
 
 ```sh
-EXYNOS9810_DEVICE="$TARGET_CODENAME"
 case "$EXYNOS9810_DEVICE" in
     starlte|star2lte|crownlte) ;;
-    *) LOGW "No legacy Exynos9810 donor device overlay mapping ..."; return 0 ;;
+    r7)
+        if [ ! -d ".../device_port/device/r7/vendor" ] || [ ! -d ".../nfc/r7/vendor" ]; then
+            LOGE "r7 device-stack payloads are missing. Run extract-r7-payloads.sh ..."
+            return 1
+        fi ;;
+    *)  LOGW "No ... overlay mapping for $TARGET_CODENAME"; return 0 ;;
 esac
 ```
 
-To enable r7 you must **add `r7` to that case** AND provide the per-device
-payloads it then consumes:
+The r7 `identity` (SM-N770F) and `density` (FHD+ 420/420) cases are also already
+in place (§3b). What remains is to **populate the payloads**:
 
-* `embedded/exynos9810_legacy_port/device_port/device/r7/` — the r7 `system/`,
-  `vendor/`, `product/`, `odm/` overlays (the siblings have ~190 files each,
-  LFS-tracked, curated from the device's firmware/overlays). Because the whole
-  exynos9810 vendor base is already N770F, much of r7's overlay may be thin, but
-  it must at least exist and provide the device bits the common layer does not.
-* `embedded/.../nfc/r7/vendor/` — the r7 NFC payload (S3NRN82). Without it
-  `_EXYNOS9810_APPLY_NFC_STACK` aborts the build.
-* The r7 `identity` and `density` cases are already in place (§3b).
-* Review the other per-codename spots (S Pen `spen/`, iris `irisscannerfix/` —
-  note r7 has **no iris**, so iris enrollment should stay disabled — audio,
-  display/external-display) and add r7 handling as needed. These are iterative
-  and need on-device logs.
+* `embedded/exynos9810_legacy_port/device_port/device/r7/{system,vendor,product,odm}`
+  — the r7 overlays. The siblings ship ~190 files each (LFS-tracked), curated
+  from the device's own firmware: a handful of system libs (face HAL
+  `face.default.so`/`libFaceService.so`/`libsecfr_engine.so`, SoundBooster) and
+  the bulk in vendor (`mixer_paths.xml`, Trustonic `app/mcRegistry/*.tlbin`
+  keymaster trustlets, `vendor/overlay` RRO, camera `firmware/`, device libs).
+* `embedded/.../nfc/r7/vendor/` — just **two** device files
+  (`etc/nfc/sec_s3nrn82_rfreg.bin` + `firmware/nfc/sec_s3nrn82_firmware.bin`);
+  the Note10 Lite uses the same Samsung S3NRN82 controller, so the HAL/libs come
+  from `nfc/common`.
+
+**Use the helper:** [`extract-r7-payloads.sh`](extract-r7-payloads.sh) (repo
+root) does a mechanical first pass — run it against extracted N770F stock:
+
+```bash
+./extract-r7-payloads.sh out/fw/SM-N770F_<CSC>
+```
+
+It mirrors the crownlte overlay as a template (copying the N770F equivalent of
+each file by partition-relative path), pulls N770F's own mcRegistry trustlets +
+RRO overlays, and the two NFC files, reporting OK/MISS/SKIP per file. It then
+lists the manual follow-ups it cannot do blindly (RRO regeneration, face-HAL ABI
+check, fingerprint string, triple-camera matrix — see §2 "Fingerprint" and the
+camera TODO).
+
+Then review the other per-codename spots in the device stack — S Pen (`spen/`),
+iris (`irisscannerfix/`: **r7 has no iris**, so keep iris enrollment disabled),
+audio, display/external-display — and add r7 handling as the logs require.
 
 This step is genuine device bring-up: it needs the extracted N770F firmware and
 repeated build+flash+logcat cycles on the real device. It is the main remaining
@@ -306,9 +387,11 @@ Build host deps (Ubuntu 24.04): `clang`, `llvm` (for `llvm-readelf`), `secilc`,
 | kernel-model-aware installer + flashable verifier | **Done**, committed |
 | device-stack r7 identity + density (forward-prep) | **Done**, committed |
 | `source-inputs.json` registration | **Done**, committed |
+| device-stack gate opened for r7 (guarded) | **Done**, committed |
+| `extract-r7-payloads.sh` helper | **Done**, committed |
+| r7 kernel **source** located + defconfig validated | **Done** (`duhansysl/exynos9810-kernel duhan_ack-N770F`) |
 | Donor firmware (S22 + N770F) in `out/fw/` | **Blocked** in cloud (network policy); owner-supplied |
-| r7 kernel + DTB (`floyd/N770F-*`, erofs+ext4) | **Needed** (owner builds) |
-| `device_port/device/r7/` overlays + `nfc/r7/` payload | **Needed** (device bring-up) |
-| Open the device-stack gate for r7 | **Needed** (after payloads exist) |
+| r7 kernel **build** (enforcing+KSU, `floyd/N770F-*`) | **Needed** (owner builds; Google clang blocked in cloud, §4b) |
+| Run `extract-r7-payloads.sh` + populate `device_port/device/r7/` + `nfc/r7/` | **Needed** (device bring-up, needs firmware) |
 | Fingerprint/camera matrices verified from N770F stock | **Needed** (after extraction) |
 | Booting ROM | **Pending** the above |
