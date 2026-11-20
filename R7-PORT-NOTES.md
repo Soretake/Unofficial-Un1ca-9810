@@ -219,13 +219,27 @@ partially validated in the cloud session):
 configures **cleanly** — the r7 source + device trees are valid and present.
 
 **What is NOT done, and why:** the kernel could not be *compiled* in the cloud
-session. The 4.9 Samsung tree requires the specific Android Clang toolchain
+session. The 4.9 Samsung tree requires a specific older Android Clang toolchain
 (the ROM's prebuilts used `clang-r547379`); `apollo.sh` downloads it from
 `android.googlesource.com`, which **this environment's network policy blocks**.
-The host system Clang 18 fails the tree's `prepare-compiler-check`
-(`-fstack-protector-strong not supported` — a 4.9-vs-clang-18 mismatch). A
-GitHub-hosted Neutron Clang is reachable and `apollo.sh` supports it (options
-5–7), so the owner can build locally.
+The host system Clang 18 (the only trusted, preinstalled compiler) fails the
+tree's `prepare-compiler-check` (`-fstack-protector-strong not supported` — a
+4.9-vs-clang-18 mismatch).
+
+A GitHub-hosted older Clang *is* reachable and `apollo.sh` supports one
+(`physwizz/clang-r383902` clones fine and has the exact
+`clang/host/linux-x86/clang-r383902/bin/` + `gcc-4.9` layout the Makefile
+expects). But the cloud session's **oversight policy blocks executing an
+untrusted third-party binary downloaded from the internet** — running the
+cloned `clang` was denied, and a kernel build would invoke it continuously.
+So the compile cannot happen in this cloud session regardless of the toolchain
+source. This is a safe-by-default stance, not a bug.
+
+**Therefore the r7 kernel must be built on the owner's own machine**, where the
+toolchain is trusted and `android.googlesource.com` (or a GitHub mirror) is
+reachable. The source, the validated defconfig, the enforcing/KSU/SuSFS profile
+and the `floyd/` packaging recipe below are everything needed to do that in one
+`apollo.sh` run.
 
 Two caveats before this becomes a drop-in ROM kernel:
 
